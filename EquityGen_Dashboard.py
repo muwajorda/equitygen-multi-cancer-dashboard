@@ -30,10 +30,7 @@ if compare_toggle:
 
 # Load primary dataset
 if clinical_file and expression_file:
-    # Detect indication from filename
     cancer_type = os.path.basename(clinical_file.name).split("_")[1] if "_" in clinical_file.name else "Unknown"
-
-    # Load files
     clinical_df = pd.read_csv(clinical_file)
     expression_df = pd.read_csv(expression_file)
 
@@ -46,7 +43,6 @@ if clinical_file and expression_file:
     top_expression_df.rename(columns={'index': 'Sample_ID'}, inplace=True)
     top_expression_df['Patient_ID'] = top_expression_df['Sample_ID'].str[:12]
 
-    # Merge with clinical
     merged_df = pd.merge(clinical_df, top_expression_df, on='Patient_ID', how='inner')
     df = merged_df.dropna(subset=['Race', 'Survival_Time', 'Event'])
 
@@ -82,7 +78,7 @@ if clinical_file and expression_file:
 
     st.subheader("🧠 Risk Prediction (ML Model)")
     ml_df = df.dropna(subset=['Age'])
-    X = ml_df.iloc[:, 12:]
+    X = ml_df.iloc[:, 12:].copy()
     X['Age'] = ml_df['Age']
     y = ml_df['Event']
     X_train, X_test, y_train, y_test = train_test_split(X, y, stratify=y, test_size=0.3, random_state=42)
@@ -95,18 +91,52 @@ if clinical_file and expression_file:
     st.write(f"**Random Forest AUC:** {rf_auc:.2f}")
 
     lr = LogisticRegression(max_iter=1000)
-    lr.fit(X_train, y_train)
-    lr_acc = accuracy_score(y_test, lr.predict(X_test))
-    lr_auc = roc_auc_score(y_test, lr.predict_proba(X_test)[:, 1])
-    st.write(f"**Logistic Regression Accuracy:** {lr_acc:.2f}")
-    st.write(f"**Logistic Regression AUC:** {lr_auc:.2f}")
+    try:
+        lr.fit(X_train, y_train)
+        lr_acc = accuracy_score(y_test, lr.predict(X_test))
+        lr_auc = roc_auc_score(y_test, lr.predict_proba(X_test)[:, 1])
+        st.write(f"**Logistic Regression Accuracy:** {lr_acc:.2f}")
+        st.write(f"**Logistic Regression AUC:** {lr_auc:.2f}")
+    except ValueError:
+        st.warning("⚠️ Logistic Regression encountered NaNs or convergence issues. Check input data or try removing problematic features.")
+
+    st.subheader("💊 Suggested Treatments (Expression-Based)")
+    gene_threshold = st.slider(f"Expression threshold for {gene}", float(df[gene].min()), float(df[gene].max()), float(df[gene].mean()))
+    high_expr_df = filtered_df[filtered_df[gene] > gene_threshold]
+
+    if not high_expr_df.empty:
+        # Dummy gene-drug mapping for demo
+        drug_suggestions = {
+            "BRCA1": ["Olaparib", "Talazoparib"],
+            "EGFR": ["Erlotinib", "Gefitinib"],
+            "TP53": ["APR-246", "Nutlin-3"],
+            "PIK3CA": ["Alpelisib"]
+        }
+        suggested_drugs = drug_suggestions.get(gene.upper(), ["No mapped drug for this gene"])
+        st.markdown("**Suggested Drug(s):** " + ", ".join(suggested_drugs))
+    else:
+        st.info("No samples with expression above threshold.")
 
     st.download_button("Download Filtered Data", data=filtered_df.to_csv(index=False), file_name=f"filtered_equitygen_data_{cancer_type}.csv")
+    st.download_button("Download Report (Excel)", data=filtered_df.to_csv(index=False), file_name="report.xlsx")
 
-# Optional: second dataset processing block could go here in future
+    # Summary Panel Placeholder
+    st.subheader("📝 Summary Panel")
+    st.markdown("This panel will summarize all key findings, model results, and suggested drugs.")
+
+    # Optional Treatment Suggestion Placeholder
+    st.subheader("💡 Future Feature: Personalized Treatment Engine")
+    st.markdown("Imagine AI suggesting drugs based on patient-specific omics profiles. Coming soon!")
+
 if compare_toggle and second_clinical_file and second_expression_file:
-    st.warning("🧪 Compare feature is coming next — currently supports only one dataset loaded at a time.")
-
+    st.header("🧪 Comparison: Second Dataset")
+    try:
+        second_clinical_df = pd.read_csv(second_clinical_file)
+        second_expression_df = pd.read_csv(second_expression_file)
+        st.success("Second dataset uploaded successfully.")
+        st.write("Comparison features in progress...")
+    except Exception as e:
+        st.error(f"Error loading second dataset: {e}")
 else:
     st.info("📂 Please upload your clinical and expression datasets to get started.")
 
