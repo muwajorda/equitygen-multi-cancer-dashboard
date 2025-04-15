@@ -76,7 +76,7 @@ if clinical_file and expression_file:
     fig_surv.update_layout(title=f"Survival by Race - {cancer_type}", xaxis_title="Time (days)", yaxis_title="Survival Probability")
     st.plotly_chart(fig_surv, use_container_width=True)
 
-    st.subheader("🧠 Risk Prediction (ML Model)")
+    st.subheader("🧐 Risk Prediction (ML Model)")
     ml_df = df.dropna(subset=['Age'])
     X = ml_df.iloc[:, 12:].copy()
     X['Age'] = ml_df['Age']
@@ -92,13 +92,17 @@ if clinical_file and expression_file:
 
     lr = LogisticRegression(max_iter=1000)
     try:
-        lr.fit(X_train, y_train)
-        lr_acc = accuracy_score(y_test, lr.predict(X_test))
-        lr_auc = roc_auc_score(y_test, lr.predict_proba(X_test)[:, 1])
+        X_train_clean = X_train.dropna(axis=1)
+        X_test_clean = X_test[X_train_clean.columns].dropna(axis=1)
+
+        lr.fit(X_train_clean, y_train)
+        lr_acc = accuracy_score(y_test, lr.predict(X_test_clean))
+        lr_auc = roc_auc_score(y_test, lr.predict_proba(X_test_clean)[:, 1])
         st.write(f"**Logistic Regression Accuracy:** {lr_acc:.2f}")
         st.write(f"**Logistic Regression AUC:** {lr_auc:.2f}")
-    except ValueError:
-        st.warning("⚠️ Logistic Regression encountered NaNs or convergence issues. Check input data or try removing problematic features.")
+    except ValueError as e:
+        st.error("⚠️ Logistic Regression failed due to input issues.")
+        st.text(str(e))
 
     st.subheader("💊 Suggested Treatments (Expression-Based)")
     gene_threshold = st.slider(f"Expression threshold for {gene}", float(df[gene].min()), float(df[gene].max()), float(df[gene].mean()))
