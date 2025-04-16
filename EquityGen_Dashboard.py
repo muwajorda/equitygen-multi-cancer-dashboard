@@ -14,10 +14,22 @@ from lifelines import KaplanMeierFitter
 GENES_OF_INTEREST = ['gene1', 'gene2', 'gene3', 'gene4']
 
 def load_data():
-    uploaded_file = st.file_uploader("Upload your CSV data", type="csv")
-    if uploaded_file is not None:
-        return pd.read_csv(uploaded_file)
-    return None
+    st.markdown("### Upload Your Data Files")
+    clinical_file = st.file_uploader("Step 1: Upload Clinical Data", type="csv", key="clinical")
+    expression_file = st.file_uploader("Step 2: Upload Expression/Mutation Data", type="csv", key="expression")
+
+    if clinical_file is not None and expression_file is not None:
+        try:
+            clinical_data = pd.read_csv(clinical_file)
+            expression_data = pd.read_csv(expression_file)
+            merged_data = pd.merge(expression_data, clinical_data, on="patient_id")
+            return merged_data
+        except Exception as e:
+            st.error(f"❌ Error reading files: {e}")
+            return None
+    else:
+        st.info("👆 Please upload **both** Clinical and Expression files.")
+        return None
 
 def plot_gene_expression_by_race(data):
     fig, ax = plt.subplots(figsize=(10, 6))
