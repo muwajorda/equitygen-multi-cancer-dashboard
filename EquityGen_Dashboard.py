@@ -1,4 +1,4 @@
-# Demographic and Race-Aware Precision Medicine Analysis
+# Demographic and Race-Aware Precision Medicine Analysis (Modular Version)
 
 import pandas as pd
 import numpy as np
@@ -9,109 +9,134 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, roc_auc_score
 from lifelines import KaplanMeierFitter
 
-# Load data with demographic information
-# Ensure dataset contains 'gene_expression', 'survival_time', 'survival_status', 'gene', 'race'
-data = pd.read_csv("your_data.csv")
+# Global variable
+GENES_OF_INTEREST = ['gene1', 'gene2', 'gene3', 'gene4']
 
-# Genes of interest - replace with actual genes
-genes_of_interest = ['gene1', 'gene2', 'gene3', 'gene4']
+# Load Data
+def load_data(path):
+    return pd.read_csv(path)
 
-# Boxplot to visualize gene expression differences by race
-plt.figure(figsize=(10, 6))
-sns.boxplot(x='race', y='gene_expression', hue='gene',
-            data=data[data['gene'].isin(genes_of_interest)])
-plt.title('Gene Expression by Race')
-plt.xlabel('Race')
-plt.ylabel('Gene Expression')
-plt.legend(title='Gene')
-plt.tight_layout()
-plt.show()
+# Visualization of Gene Expression by Race
+def plot_gene_expression_by_race(data):
+    plt.figure(figsize=(10, 6))
+    sns.boxplot(x='race', y='gene_expression', hue='gene',
+                data=data[data['gene'].isin(GENES_OF_INTEREST)])
+    plt.title('Gene Expression by Race')
+    plt.xlabel('Race')
+    plt.ylabel('Gene Expression')
+    plt.legend(title='Gene')
+    plt.tight_layout()
+    plt.show()
 
-# Survival analysis stratified by race
-kmf = KaplanMeierFitter()
-plt.figure(figsize=(10, 6))
-for race in data['race'].unique():
-    race_data = data[data['race'] == race]
-    kmf.fit(race_data['survival_time'], event_observed=race_data['survival_status'], label=race)
-    kmf.plot()
+# Kaplan-Meier Survival Curves by Race
+def plot_survival_by_race(data):
+    kmf = KaplanMeierFitter()
+    plt.figure(figsize=(10, 6))
+    for race in data['race'].unique():
+        race_data = data[data['race'] == race]
+        kmf.fit(race_data['survival_time'], event_observed=race_data['survival_status'], label=race)
+        kmf.plot()
 
-plt.title('Survival Curves by Race')
-plt.xlabel('Survival Time (Days)')
-plt.ylabel('Survival Probability')
-plt.legend(title='Race')
-plt.tight_layout()
-plt.show()
+    plt.title('Survival Curves by Race')
+    plt.xlabel('Survival Time (Days)')
+    plt.ylabel('Survival Probability')
+    plt.legend(title='Race')
+    plt.tight_layout()
+    plt.show()
 
-# Feature preparation: genes and race encoding
-features = data[genes_of_interest + ['race']]
-target = data['survival_status']
-features_encoded = pd.get_dummies(features, columns=['race'])
+# Feature Preparation
+def prepare_features(data):
+    features = data[GENES_OF_INTEREST + ['race']]
+    features_encoded = pd.get_dummies(features, columns=['race'])
+    target = data['survival_status']
+    return features_encoded, target
 
-# Random Forest risk prediction
-rf_model = RandomForestClassifier()
-rf_model.fit(features_encoded, target)
-rf_predictions = rf_model.predict(features_encoded)
-rf_probs = rf_model.predict_proba(features_encoded)[:, 1]
-rf_accuracy = accuracy_score(target, rf_predictions)
-rf_auc = roc_auc_score(target, rf_probs)
+# Model Training and Evaluation
+def train_models(features_encoded, target):
+    rf_model = RandomForestClassifier()
+    rf_model.fit(features_encoded, target)
+    rf_probs = rf_model.predict_proba(features_encoded)[:, 1]
+    rf_accuracy = accuracy_score(target, rf_model.predict(features_encoded))
+    rf_auc = roc_auc_score(target, rf_probs)
 
-print(f"Random Forest Accuracy: {rf_accuracy:.2f}")
-print(f"Random Forest AUC: {rf_auc:.2f}")
+    lr_model = LogisticRegression()
+    lr_model.fit(features_encoded, target)
+    lr_probs = lr_model.predict_proba(features_encoded)[:, 1]
+    lr_accuracy = accuracy_score(target, lr_model.predict(features_encoded))
+    lr_auc = roc_auc_score(target, lr_probs)
 
-# Logistic Regression for comparison
-lr_model = LogisticRegression()
-lr_model.fit(features_encoded, target)
-lr_predictions = lr_model.predict(features_encoded)
-lr_probs = lr_model.predict_proba(features_encoded)[:, 1]
-lr_accuracy = accuracy_score(target, lr_predictions)
-lr_auc = roc_auc_score(target, lr_probs)
+    print(f"🎯 Random Forest Accuracy: {rf_accuracy:.2f}, AUC: {rf_auc:.2f}")
+    print(f"📊 Logistic Regression Accuracy: {lr_accuracy:.2f}, AUC: {lr_auc:.2f}")
 
-print(f"Logistic Regression Accuracy: {lr_accuracy:.2f}")
-print(f"Logistic Regression AUC: {lr_auc:.2f}")
+    return rf_model, rf_probs
 
-# Assign risk scores and risk categories
-risk_scores = rf_probs
-risk_categories = pd.cut(risk_scores, bins=[0, 0.33, 0.66, 1.0], labels=['Low', 'Medium', 'High'])
-data['risk_score'] = risk_scores
-data['risk_group'] = risk_categories
+# Assign Risk Scores and Risk Groups
+def assign_risk_groups(data, risk_scores):
+    data['risk_score'] = risk_scores
+    data['risk_group'] = pd.cut(risk_scores, bins=[0, 0.33, 0.66, 1.0], labels=['Low', 'Medium', 'High'])
+    return data
 
-# Count of risk groups by race
-plt.figure(figsize=(10, 6))
-sns.countplot(x='race', hue='risk_group', data=data)
-plt.title('Patient Risk Categories by Race')
-plt.xlabel('Race')
-plt.ylabel('Number of Patients')
-plt.legend(title='Risk Group')
-plt.tight_layout()
-plt.show()
+# Plot Risk Categories by Race
+def plot_risk_distribution_by_race(data):
+    plt.figure(figsize=(10, 6))
+    sns.countplot(x='race', hue='risk_group', data=data)
+    plt.title('Distribution of Risk Categories by Race')
+    plt.xlabel('Race')
+    plt.ylabel('Number of Patients')
+    plt.legend(title='Risk Group')
+    plt.tight_layout()
+    plt.show()
 
-# Gene expression across races and risk groups
-plt.figure(figsize=(12, 6))
-sns.boxplot(x='race', y='gene_expression', hue='risk_group',
-            data=data[data['gene'].isin(genes_of_interest)])
-plt.title('Gene Expression Across Race and Risk Groups')
-plt.xlabel('Race')
-plt.ylabel('Gene Expression')
-plt.legend(title='Risk Group')
-plt.tight_layout()
-plt.show()
+# Plot Gene Expression by Risk Group and Race
+def plot_expression_by_risk_group(data):
+    plt.figure(figsize=(12, 6))
+    sns.boxplot(x='race', y='gene_expression', hue='risk_group',
+                data=data[data['gene'].isin(GENES_OF_INTEREST)])
+    plt.title('Gene Expression by Risk Group and Race')
+    plt.xlabel('Race')
+    plt.ylabel('Gene Expression')
+    plt.legend(title='Risk Group')
+    plt.tight_layout()
+    plt.show()
 
-# Feature importance for treatment insights
-importances = rf_model.feature_importances_
-feature_importance_df = pd.DataFrame({
-    'Feature': features_encoded.columns,
-    'Importance': importances
-}).sort_values(by='Importance', ascending=False)
+# Feature Importance Summary
+def summarize_feature_importance(model, features_encoded):
+    importances = model.feature_importances_
+    feature_importance_df = pd.DataFrame({
+        'Feature': features_encoded.columns,
+        'Importance': importances
+    }).sort_values(by='Importance', ascending=False)
+    print("🔬 Top Genes and Demographic Features Influencing Survival Prediction:")
+    print(feature_importance_df.head(10))
 
-print("Top Genes and Demographic Features Influencing Survival Prediction:")
-print(feature_importance_df.head(10))
+# Patient-Level Summary Output
+def patient_summary(data):
+    summary = data[['patient_id', 'race', 'risk_score', 'risk_group']].drop_duplicates()
+    print("\n📋 Example Patient Risk Summary:")
+    print(summary.head())
 
-# Clinical relevance explanation (in lay terms)
-print("\nInterpretation for Users:")
-print("Your genetic information and race can influence how your body responds to certain diseases and treatments. This tool uses a model trained on real patient data to estimate your survival risk and identify the most important genes linked to that risk.")
-print("If your score is 'High Risk', it means that your profile closely matches patients who had more severe outcomes. This doesn’t mean a poor outcome is guaranteed — it highlights the need for closer monitoring or targeted treatment.")
-print("Genes listed in the 'Top Important Features' are the ones most associated with your outcome prediction. These may be used in future treatment decisions.")
+# Clinical Explanation Output
+def print_clinical_explanation():
+    print("\n🧬 What this means for your health:")
+    print("- This tool uses your genetic expression and racial background to estimate your health risk.")
+    print("- 'High Risk' means similarity to patients with shorter survival times — this may call for proactive screening or targeted care.")
+    print("- Genes most strongly influencing your prediction may be relevant for personalized treatments in the future.")
+    print("- This app aims to bridge gaps in care by considering racial disparities in biology and access.")
 
-# TODO: Link gene information to specific known treatments based on race
-# This can be implemented using a lookup table of gene-drug associations filtered by population response data
+# Main Function
+def main():
+    data = load_data("your_data.csv")
+    plot_gene_expression_by_race(data)
+    plot_survival_by_race(data)
+    features_encoded, target = prepare_features(data)
+    rf_model, rf_probs = train_models(features_encoded, target)
+    data = assign_risk_groups(data, rf_probs)
+    plot_risk_distribution_by_race(data)
+    plot_expression_by_risk_group(data)
+    summarize_feature_importance(rf_model, features_encoded)
+    patient_summary(data)
+    print_clinical_explanation()
+
+if __name__ == "__main__":
+    main()
 
