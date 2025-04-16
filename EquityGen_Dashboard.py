@@ -6,6 +6,8 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, roc_auc_score
+import matplotlib.pyplot as plt
+import seaborn as sns
 import os
 
 # Set page config first
@@ -36,7 +38,7 @@ if clinical_file and expression_file:
     expression_df_grouped = expression_df.groupby(['Gene', 'Sample_ID'])['FPKM'].mean().reset_index()
     expression_pivot = expression_df_grouped.pivot(index='Gene', columns='Sample_ID', values='FPKM')
     gene_variance = expression_pivot.var(axis=1)
-    top_genes = gene_variance.sort_values(ascending=False).head(500).index
+    top_genes = gene_variance.sort_values(ascending=False).head(20).index  # Top 20 genes by variance
     top_expression_df = expression_pivot.loc[top_genes].T.reset_index()
     top_expression_df.rename(columns={'index': 'Sample_ID'}, inplace=True)
     top_expression_df['Patient_ID'] = top_expression_df['Sample_ID'].str[:12]
@@ -69,8 +71,7 @@ if clinical_file and expression_file:
     fig_surv.update_layout(title=f"Survival by Race - {cancer_type}", xaxis_title="Time (days)", yaxis_title="Survival Probability")
     st.plotly_chart(fig_surv, use_container_width=True)
 
-    # Risk Prediction (ML Model)
-    st.subheader("🧑‍⚕️ Patient-Level Risk Prediction (ML Model)")
+    st.subheader("🧐 Risk Prediction (ML Model)")
     ml_df = df.dropna(subset=['Age'])
     X = ml_df.iloc[:, 12:].copy()
     X['Age'] = ml_df['Age']
@@ -81,15 +82,14 @@ if clinical_file and expression_file:
     rf.fit(X_train, y_train)
     rf_acc = accuracy_score(y_test, rf.predict(X_test))
     rf_auc = roc_auc_score(y_test, rf.predict_proba(X_test)[:, 1])
-    st.write(f"**Random Forest Model Performance**")
-    st.write(f"Accuracy: {rf_acc:.2f}")
-    st.write(f"AUC: {rf_auc:.2f}")
+    st.write(f"**Risk Prediction using Random Forest**: Accuracy: {rf_acc:.2f} | AUC: {rf_auc:.2f}")
 
-    # Predicted Risk Score for a few patients
-    risk_scores = rf.predict_proba(X_test)[:, 1]
-    patient_risk_df = pd.DataFrame({"Patient_ID": X_test.index, "Risk_Score": risk_scores})
-    patient_risk_df["Risk_Group"] = pd.cut(patient_risk_df["Risk_Score"], bins=[0, 0.33, 0.66, 1], labels=["Low", "Medium", "High"])
-    st.write(patient_risk_df.head(10))  # Show top 10 patients with risk scores
+    # Create Patient-Level Risk Scores and divide into Risk Groups
+    rf_pred_proba = rf.predict_proba(X_test)[:, 1]
+    risk_groups = ['Low Risk' if x < 0.33 else 'Medium Risk' if x < 0.66 else 'High Risk' for x in rf_pred_proba]
+    risk_df = pd.DataFrame({"Patient_ID": X_test.index, "Risk_Score": rf_pred_proba, "Risk_Group": risk_groups})
+    st.write(f"**Patient-Level Risk Groups** (based on Random Forest model):")
+    st.dataframe(risk_df)
 
     st.subheader("💊 Suggested Treatments (Expression-Based)")
     gene_threshold = st.slider(f"Expression threshold for {gene}", float(df[gene].min()), float(df[gene].max()), float(df[gene].mean()))
@@ -110,15 +110,18 @@ if clinical_file and expression_file:
     st.download_button("Download Filtered Data", data=filtered_df.to_csv(index=False), file_name=f"filtered_equitygen_data_{cancer_type}.csv")
     st.download_button("Download Report (Excel)", data=filtered_df.to_csv(index=False), file_name="report.xlsx")
 
-    if compare_toggle and second_clinical_file and second_expression_file:
-        st.header("🧪 Comparison: Second Dataset")
-        try:
-            second_clinical_df = pd.read_csv(second_clinical_file)
-            second_expression_df = pd.read_csv(second_expression_file)
-            st.success("Second dataset uploaded successfully.")
-            st.write("Comparison features in progress...")
-        except Exception as e:
-            st.error(f"Error loading second dataset: {e}")
+    # Remove Summary Panel
+    # Removed the summary panel as per request.
+
+if compare_toggle and second_clinical_file and second_expression_file:
+    st.header("🧪 Comparison: Second Dataset")
+    try:
+        second_clinical_df = pd.read_csv(second_clinical_file)
+        second_expression_df = pd.read_csv(second_expression_file)
+        st.success("Second dataset uploaded successfully.")
+        st.write("Comparison features in progress...")
+    except Exception as e:
+        st.error(f"Error loading second dataset: {e}")
 else:
     st.info("📂 Please upload your clinical and expression datasets to get started.")
 
