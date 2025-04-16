@@ -5,10 +5,7 @@ from lifelines import KaplanMeierFitter
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, roc_auc_score, roc_curve
-import matplotlib.pyplot as plt
-import seaborn as sns
-import numpy as np
+from sklearn.metrics import accuracy_score, roc_auc_score
 import os
 
 # Set page config first
@@ -35,6 +32,7 @@ if clinical_file and expression_file:
     clinical_df = pd.read_csv(clinical_file)
     expression_df = pd.read_csv(expression_file)
 
+    # Preprocess expression data
     expression_df_grouped = expression_df.groupby(['Gene', 'Sample_ID'])['FPKM'].mean().reset_index()
     expression_pivot = expression_df_grouped.pivot(index='Gene', columns='Sample_ID', values='FPKM')
     gene_variance = expression_pivot.var(axis=1)
@@ -49,6 +47,7 @@ if clinical_file and expression_file:
     st.success(f"✅ {cancer_type} files loaded successfully")
     st.header(f"📊 Exploring {cancer_type} Dataset")
 
+    # Sidebar filters
     st.sidebar.header("Filters")
     gene = st.sidebar.selectbox("Select a Gene", options=df.columns[12:])
     races = st.sidebar.multiselect("Select Race Groups", options=df["Race"].dropna().unique(), default=list(df["Race"].dropna().unique()))
@@ -57,11 +56,6 @@ if clinical_file and expression_file:
     st.subheader("📊 Gene Expression by Race")
     fig = px.box(filtered_df, x="Race", y=gene, color="Race", title=f"Expression of {gene} in {cancer_type}", points="all")
     st.plotly_chart(fig, use_container_width=True)
-
-    st.subheader("📈 Top Genes by Variance")
-    variance_df = df.iloc[:, 12:].var().sort_values(ascending=False).reset_index()
-    variance_df.columns = ["Gene", "Variance"]
-    st.dataframe(variance_df.head(20))
 
     st.subheader("⏳ Kaplan-Meier Survival Curve")
     kmf = KaplanMeierFitter()
@@ -75,7 +69,8 @@ if clinical_file and expression_file:
     fig_surv.update_layout(title=f"Survival by Race - {cancer_type}", xaxis_title="Time (days)", yaxis_title="Survival Probability")
     st.plotly_chart(fig_surv, use_container_width=True)
 
-    st.subheader("🧐 Risk Prediction (ML Model)")
+    # Risk Prediction (ML Model)
+    st.subheader("🧑‍⚕️ Patient-Level Risk Prediction (ML Model)")
     ml_df = df.dropna(subset=['Age'])
     X = ml_df.iloc[:, 12:].copy()
     X['Age'] = ml_df['Age']
@@ -84,54 +79,17 @@ if clinical_file and expression_file:
 
     rf = RandomForestClassifier(n_estimators=100, random_state=42)
     rf.fit(X_train, y_train)
-    rf_probs = rf.predict_proba(X_test)[:, 1]
     rf_acc = accuracy_score(y_test, rf.predict(X_test))
-    rf_auc = roc_auc_score(y_test, rf_probs)
-    st.write(f"**Random Forest Accuracy:** {rf_acc:.2f}")
-    st.write(f"**Random Forest AUC:** {rf_auc:.2f}")
+    rf_auc = roc_auc_score(y_test, rf.predict_proba(X_test)[:, 1])
+    st.write(f"**Random Forest Model Performance**")
+    st.write(f"Accuracy: {rf_acc:.2f}")
+    st.write(f"AUC: {rf_auc:.2f}")
 
-    lr = LogisticRegression(max_iter=1000)
-    try:
-        X_train_clean = X_train.dropna(axis=1)
-        X_test_clean = X_test[X_train_clean.columns].dropna(axis=1)
-        lr.fit(X_train_clean, y_train)
-        lr_probs = lr.predict_proba(X_test_clean)[:, 1]
-        lr_acc = accuracy_score(y_test, lr.predict(X_test_clean))
-        lr_auc = roc_auc_score(y_test, lr_probs)
-        st.write(f"**Logistic Regression Accuracy:** {lr_acc:.2f}")
-        st.write(f"**Logistic Regression AUC:** {lr_auc:.2f}")
-
-        st.subheader("📉 Visual AUC Comparison (ROC Curves)")
-        fpr_rf, tpr_rf, _ = roc_curve(y_test, rf_probs)
-        fpr_lr, tpr_lr, _ = roc_curve(y_test, lr_probs)
-        fig_roc, ax = plt.subplots()
-        ax.plot(fpr_rf, tpr_rf, label=f'Random Forest (AUC = {rf_auc:.2f}')
-        ax.plot(fpr_lr, tpr_lr, label=f'Logistic Regression (AUC = {lr_auc:.2f}')
-        ax.plot([0, 1], [0, 1], 'k--')
-        ax.set_xlabel('False Positive Rate')
-        ax.set_ylabel('True Positive Rate')
-        ax.set_title('ROC Curve Comparison')
-        ax.legend()
-        st.pyplot(fig_roc)
-
-        st.subheader("🔬 Clinical Feature Importance (Top Genes)")
-        importances = pd.Series(rf.feature_importances_, index=X.columns)
-        top_features = importances.sort_values(ascending=False).head(10)
-        st.bar_chart(top_features)
-
-        st.subheader("⚠️ Patient-Level Risk Scores and Risk Groups")
-        risk_scores = pd.DataFrame({"Patient_ID": ml_df["Patient_ID"].values, "Risk_Score": rf_probs})
-        risk_scores["Risk_Group"] = pd.qcut(risk_scores["Risk_Score"], q=3, labels=["Low", "Medium", "High"])
-        st.dataframe(risk_scores.sample(10))
-
-        st.subheader("📏 Confidence Intervals on Risk Scores")
-        ci_range = 0.1
-        risk_scores["Confidence_Interval"] = risk_scores["Risk_Score"].apply(lambda x: f"{x:.2f} ± {ci_range * x:.2f}")
-        st.dataframe(risk_scores[["Patient_ID", "Risk_Score", "Risk_Group", "Confidence_Interval"]].head(10))
-
-    except ValueError as e:
-        st.error("⚠️ Logistic Regression failed due to input issues.")
-        st.text(str(e))
+    # Predicted Risk Score for a few patients
+    risk_scores = rf.predict_proba(X_test)[:, 1]
+    patient_risk_df = pd.DataFrame({"Patient_ID": X_test.index, "Risk_Score": risk_scores})
+    patient_risk_df["Risk_Group"] = pd.cut(patient_risk_df["Risk_Score"], bins=[0, 0.33, 0.66, 1], labels=["Low", "Medium", "High"])
+    st.write(patient_risk_df.head(10))  # Show top 10 patients with risk scores
 
     st.subheader("💊 Suggested Treatments (Expression-Based)")
     gene_threshold = st.slider(f"Expression threshold for {gene}", float(df[gene].min()), float(df[gene].max()), float(df[gene].mean()))
@@ -152,30 +110,15 @@ if clinical_file and expression_file:
     st.download_button("Download Filtered Data", data=filtered_df.to_csv(index=False), file_name=f"filtered_equitygen_data_{cancer_type}.csv")
     st.download_button("Download Report (Excel)", data=filtered_df.to_csv(index=False), file_name="report.xlsx")
 
-    st.subheader("📝 Summary Panel")
-    summary_text = f"""
-    ### Summary for {cancer_type}
-    - Selected Gene: **{gene}**
-    - Number of Samples: **{len(filtered_df)}**
-    - Race Groups Analyzed: **{', '.join(races)}**
-    - Random Forest Accuracy: **{rf_acc:.2f}** | AUC: **{rf_auc:.2f}**
-    - Logistic Regression Accuracy: **{lr_acc:.2f}** | AUC: **{lr_auc:.2f}**
-    - Suggested Drugs: **{', '.join(suggested_drugs)}**
-    """
-    st.markdown(summary_text)
-
-    st.subheader("💡 Future Feature: Personalized Treatment Engine")
-    st.markdown("Imagine AI suggesting drugs based on patient-specific omics profiles. Coming soon!")
-
-if compare_toggle and second_clinical_file and second_expression_file:
-    st.header("🧪 Comparison: Second Dataset")
-    try:
-        second_clinical_df = pd.read_csv(second_clinical_file)
-        second_expression_df = pd.read_csv(second_expression_file)
-        st.success("Second dataset uploaded successfully.")
-        st.write("Comparison features in progress...")
-    except Exception as e:
-        st.error(f"Error loading second dataset: {e}")
+    if compare_toggle and second_clinical_file and second_expression_file:
+        st.header("🧪 Comparison: Second Dataset")
+        try:
+            second_clinical_df = pd.read_csv(second_clinical_file)
+            second_expression_df = pd.read_csv(second_expression_file)
+            st.success("Second dataset uploaded successfully.")
+            st.write("Comparison features in progress...")
+        except Exception as e:
+            st.error(f"Error loading second dataset: {e}")
 else:
     st.info("📂 Please upload your clinical and expression datasets to get started.")
 
