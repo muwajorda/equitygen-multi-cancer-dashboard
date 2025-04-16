@@ -1,127 +1,117 @@
-import streamlit as st
+# Demographic and Race-Aware Precision Medicine Analysis
+
 import pandas as pd
-import plotly.express as px
-from lifelines import KaplanMeierFitter
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, roc_auc_score
+import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-import os
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, roc_auc_score
+from lifelines import KaplanMeierFitter
 
-# Set page config first
-st.set_page_config(page_title="EquityGen Multi-Cancer Dashboard", layout="wide")
-st.title("🧬 EquityGen: Multi-Cancer Equity Dashboard")
+# Load data with demographic information
+# Ensure dataset contains 'gene_expression', 'survival_time', 'survival_status', 'gene', 'race'
+data = pd.read_csv("your_data.csv")
 
-# Upload data
-st.sidebar.header("Upload Raw Files")
-clinical_file = st.sidebar.file_uploader("Upload Clinical Data (.csv)", type=["csv"])
-expression_file = st.sidebar.file_uploader("Upload Expression Data (.csv)", type=["csv"])
+# Genes of interest - replace with actual genes
+genes_of_interest = ['gene1', 'gene2', 'gene3', 'gene4']
 
-# Optional toggle to compare with second dataset
-compare_toggle = st.sidebar.checkbox("Compare with a second indication?")
-second_clinical_file = None
-second_expression_file = None
-if compare_toggle:
-    st.sidebar.markdown("### Secondary Dataset")
-    second_clinical_file = st.sidebar.file_uploader("Upload 2nd Clinical Data", type=["csv"], key="clinical2")
-    second_expression_file = st.sidebar.file_uploader("Upload 2nd Expression Data", type=["csv"], key="expression2")
+# Boxplot to visualize gene expression differences by race
+plt.figure(figsize=(10, 6))
+sns.boxplot(x='race', y='gene_expression', hue='gene',
+            data=data[data['gene'].isin(genes_of_interest)])
+plt.title('Gene Expression by Race')
+plt.xlabel('Race')
+plt.ylabel('Gene Expression')
+plt.legend(title='Gene')
+plt.tight_layout()
+plt.show()
 
-# Load primary dataset
-if clinical_file and expression_file:
-    cancer_type = os.path.basename(clinical_file.name).split("_")[1] if "_" in clinical_file.name else "Unknown"
-    clinical_df = pd.read_csv(clinical_file)
-    expression_df = pd.read_csv(expression_file)
+# Survival analysis stratified by race
+kmf = KaplanMeierFitter()
+plt.figure(figsize=(10, 6))
+for race in data['race'].unique():
+    race_data = data[data['race'] == race]
+    kmf.fit(race_data['survival_time'], event_observed=race_data['survival_status'], label=race)
+    kmf.plot()
 
-    # Preprocess expression data
-    expression_df_grouped = expression_df.groupby(['Gene', 'Sample_ID'])['FPKM'].mean().reset_index()
-    expression_pivot = expression_df_grouped.pivot(index='Gene', columns='Sample_ID', values='FPKM')
-    gene_variance = expression_pivot.var(axis=1)
-    top_genes = gene_variance.sort_values(ascending=False).head(20).index  # Top 20 genes by variance
-    top_expression_df = expression_pivot.loc[top_genes].T.reset_index()
-    top_expression_df.rename(columns={'index': 'Sample_ID'}, inplace=True)
-    top_expression_df['Patient_ID'] = top_expression_df['Sample_ID'].str[:12]
+plt.title('Survival Curves by Race')
+plt.xlabel('Survival Time (Days)')
+plt.ylabel('Survival Probability')
+plt.legend(title='Race')
+plt.tight_layout()
+plt.show()
 
-    merged_df = pd.merge(clinical_df, top_expression_df, on='Patient_ID', how='inner')
-    df = merged_df.dropna(subset=['Race', 'Survival_Time', 'Event'])
+# Feature preparation: genes and race encoding
+features = data[genes_of_interest + ['race']]
+target = data['survival_status']
+features_encoded = pd.get_dummies(features, columns=['race'])
 
-    st.success(f"✅ {cancer_type} files loaded successfully")
-    st.header(f"📊 Exploring {cancer_type} Dataset")
+# Random Forest risk prediction
+rf_model = RandomForestClassifier()
+rf_model.fit(features_encoded, target)
+rf_predictions = rf_model.predict(features_encoded)
+rf_probs = rf_model.predict_proba(features_encoded)[:, 1]
+rf_accuracy = accuracy_score(target, rf_predictions)
+rf_auc = roc_auc_score(target, rf_probs)
 
-    # Sidebar filters
-    st.sidebar.header("Filters")
-    gene = st.sidebar.selectbox("Select a Gene", options=df.columns[12:])
-    races = st.sidebar.multiselect("Select Race Groups", options=df["Race"].dropna().unique(), default=list(df["Race"].dropna().unique()))
-    filtered_df = df[df["Race"].isin(races)]
+print(f"Random Forest Accuracy: {rf_accuracy:.2f}")
+print(f"Random Forest AUC: {rf_auc:.2f}")
 
-    st.subheader("📊 Gene Expression by Race")
-    fig = px.box(filtered_df, x="Race", y=gene, color="Race", title=f"Expression of {gene} in {cancer_type}", points="all")
-    st.plotly_chart(fig, use_container_width=True)
+# Logistic Regression for comparison
+lr_model = LogisticRegression()
+lr_model.fit(features_encoded, target)
+lr_predictions = lr_model.predict(features_encoded)
+lr_probs = lr_model.predict_proba(features_encoded)[:, 1]
+lr_accuracy = accuracy_score(target, lr_predictions)
+lr_auc = roc_auc_score(target, lr_probs)
 
-    st.subheader("⏳ Kaplan-Meier Survival Curve")
-    kmf = KaplanMeierFitter()
-    fig_surv = px.line()
-    for race in races:
-        race_df = filtered_df[filtered_df["Race"] == race]
-        kmf.fit(race_df["Survival_Time"], event_observed=race_df["Event"], label=race)
-        kmf_df = kmf.survival_function_.reset_index()
-        kmf_df.columns = ["Timeline", "Survival Probability"]
-        fig_surv.add_scatter(x=kmf_df["Timeline"], y=kmf_df["Survival Probability"], mode='lines', name=race)
-    fig_surv.update_layout(title=f"Survival by Race - {cancer_type}", xaxis_title="Time (days)", yaxis_title="Survival Probability")
-    st.plotly_chart(fig_surv, use_container_width=True)
+print(f"Logistic Regression Accuracy: {lr_accuracy:.2f}")
+print(f"Logistic Regression AUC: {lr_auc:.2f}")
 
-    st.subheader("🧐 Risk Prediction (ML Model)")
-    ml_df = df.dropna(subset=['Age'])
-    X = ml_df.iloc[:, 12:].copy()
-    X['Age'] = ml_df['Age']
-    y = ml_df['Event']
-    X_train, X_test, y_train, y_test = train_test_split(X, y, stratify=y, test_size=0.3, random_state=42)
+# Assign risk scores and risk categories
+risk_scores = rf_probs
+risk_categories = pd.cut(risk_scores, bins=[0, 0.33, 0.66, 1.0], labels=['Low', 'Medium', 'High'])
+data['risk_score'] = risk_scores
+data['risk_group'] = risk_categories
 
-    rf = RandomForestClassifier(n_estimators=100, random_state=42)
-    rf.fit(X_train, y_train)
-    rf_acc = accuracy_score(y_test, rf.predict(X_test))
-    rf_auc = roc_auc_score(y_test, rf.predict_proba(X_test)[:, 1])
-    st.write(f"**Risk Prediction using Random Forest**: Accuracy: {rf_acc:.2f} | AUC: {rf_auc:.2f}")
+# Count of risk groups by race
+plt.figure(figsize=(10, 6))
+sns.countplot(x='race', hue='risk_group', data=data)
+plt.title('Patient Risk Categories by Race')
+plt.xlabel('Race')
+plt.ylabel('Number of Patients')
+plt.legend(title='Risk Group')
+plt.tight_layout()
+plt.show()
 
-    # Create Patient-Level Risk Scores and divide into Risk Groups
-    rf_pred_proba = rf.predict_proba(X_test)[:, 1]
-    risk_groups = ['Low Risk' if x < 0.33 else 'Medium Risk' if x < 0.66 else 'High Risk' for x in rf_pred_proba]
-    risk_df = pd.DataFrame({"Patient_ID": X_test.index, "Risk_Score": rf_pred_proba, "Risk_Group": risk_groups})
-    st.write(f"**Patient-Level Risk Groups** (based on Random Forest model):")
-    st.dataframe(risk_df)
+# Gene expression across races and risk groups
+plt.figure(figsize=(12, 6))
+sns.boxplot(x='race', y='gene_expression', hue='risk_group',
+            data=data[data['gene'].isin(genes_of_interest)])
+plt.title('Gene Expression Across Race and Risk Groups')
+plt.xlabel('Race')
+plt.ylabel('Gene Expression')
+plt.legend(title='Risk Group')
+plt.tight_layout()
+plt.show()
 
-    st.subheader("💊 Suggested Treatments (Expression-Based)")
-    gene_threshold = st.slider(f"Expression threshold for {gene}", float(df[gene].min()), float(df[gene].max()), float(df[gene].mean()))
-    high_expr_df = filtered_df[filtered_df[gene] > gene_threshold]
+# Feature importance for treatment insights
+importances = rf_model.feature_importances_
+feature_importance_df = pd.DataFrame({
+    'Feature': features_encoded.columns,
+    'Importance': importances
+}).sort_values(by='Importance', ascending=False)
 
-    if not high_expr_df.empty:
-        drug_suggestions = {
-            "BRCA1": ["Olaparib", "Talazoparib"],
-            "EGFR": ["Erlotinib", "Gefitinib"],
-            "TP53": ["APR-246", "Nutlin-3"],
-            "PIK3CA": ["Alpelisib"]
-        }
-        suggested_drugs = drug_suggestions.get(gene.upper(), ["No mapped drug for this gene"])
-        st.markdown("**Suggested Drug(s):** " + ", ".join(suggested_drugs))
-    else:
-        st.info("No samples with expression above threshold.")
+print("Top Genes and Demographic Features Influencing Survival Prediction:")
+print(feature_importance_df.head(10))
 
-    st.download_button("Download Filtered Data", data=filtered_df.to_csv(index=False), file_name=f"filtered_equitygen_data_{cancer_type}.csv")
-    st.download_button("Download Report (Excel)", data=filtered_df.to_csv(index=False), file_name="report.xlsx")
+# Clinical relevance explanation (in lay terms)
+print("\nInterpretation for Users:")
+print("Your genetic information and race can influence how your body responds to certain diseases and treatments. This tool uses a model trained on real patient data to estimate your survival risk and identify the most important genes linked to that risk.")
+print("If your score is 'High Risk', it means that your profile closely matches patients who had more severe outcomes. This doesn’t mean a poor outcome is guaranteed — it highlights the need for closer monitoring or targeted treatment.")
+print("Genes listed in the 'Top Important Features' are the ones most associated with your outcome prediction. These may be used in future treatment decisions.")
 
-    # Remove Summary Panel
-    # Removed the summary panel as per request.
-
-if compare_toggle and second_clinical_file and second_expression_file:
-    st.header("🧪 Comparison: Second Dataset")
-    try:
-        second_clinical_df = pd.read_csv(second_clinical_file)
-        second_expression_df = pd.read_csv(second_expression_file)
-        st.success("Second dataset uploaded successfully.")
-        st.write("Comparison features in progress...")
-    except Exception as e:
-        st.error(f"Error loading second dataset: {e}")
-else:
-    st.info("📂 Please upload your clinical and expression datasets to get started.")
+# TODO: Link gene information to specific known treatments based on race
+# This can be implemented using a lookup table of gene-drug associations filtered by population response data
 
